@@ -36,7 +36,7 @@ with st.sidebar:
     # Model name input
     model_name = st.text_input(
         "Model Name",
-        value="meta/llama-3.1-70b-instruct",
+        value="deepseek-ai/deepseek-ai-flash-0731",
         help="e.g., meta/llama-3.1-70b-instruct, mistralai/mixtral-8x7b-instruct-v0.1, etc."
     )
     
