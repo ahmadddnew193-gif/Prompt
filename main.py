@@ -8,7 +8,7 @@ import json
 import time
 from datetime import datetime
 from openai import OpenAI
-
+import os
 # -------------------------------
 # PAGE CONFIGURATION
 # -------------------------------
