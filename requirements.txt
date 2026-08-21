@@ -1,4 +1,3 @@
-openai
+
 streamlit
-groq
-python-dotenv
+requests
