@@ -1,6 +1,7 @@
 # app.py
-# Triple-Backend Agent Studio: OpenRouter + Google Gemini + FreeModel.dev
+# Quad-Backend Agent Studio: OpenRouter + Google Gemini + FreeModel.dev + NVIDIA NIM
 # Full ChatGPT-style UI with streaming, uncensored model detection, and multi-backend support
+# NVIDIA NIM fix: extra_body for DeepSeek V4 / GLM 5.1
 
 import streamlit as st
 import requests
@@ -13,7 +14,7 @@ from openai import OpenAI
 # PAGE CONFIGURATION
 # -------------------------------
 st.set_page_config(
-    page_title="⚡ Triple-Backend Agent Studio",
+    page_title="⚡ Quad-Backend Agent Studio",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -42,6 +43,8 @@ if "backend" not in st.session_state:
     st.session_state.backend = "OpenRouter"
 if "freemodel_base_url" not in st.session_state:
     st.session_state.freemodel_base_url = "https://api.freemodel.dev/v1"
+if "nim_extra_body" not in st.session_state:
+    st.session_state.nim_extra_body = False
 
 # -------------------------------
 # SIDEBAR: CONFIGURATION
@@ -53,7 +56,7 @@ with st.sidebar:
     st.subheader("🎯 Backend Provider")
     backend = st.selectbox(
         "Select Backend",
-        options=["OpenRouter", "Google Gemini", "FreeModel.dev"],
+        options=["OpenRouter", "Google Gemini", "FreeModel.dev", "NVIDIA NIM"],
         index=0,
         help="Choose which API backend to use"
     )
@@ -196,6 +199,41 @@ with st.sidebar:
         
         st.caption("💡 Tier 0: 0.5x discounted rate")
     
+    elif backend == "NVIDIA NIM":
+        st.subheader("🔑 NVIDIA NIM")
+        api_key = st.text_input(
+            "API Key",
+            type="password",
+            placeholder="nvapi-...",
+            help="Get your key from build.nvidia.com"
+        )
+        
+        base_url = st.text_input(
+            "Base URL",
+            value="https://integrate.api.nvidia.com/v1",
+            help="NVIDIA NIM endpoint"
+        )
+        
+        model_input = st.text_input(
+            "Model ID",
+            placeholder="e.g., moonshotai/kimi-k3, meta/llama-3.1-70b-instruct, deepseek-ai/deepseek-v4-flash",
+            help="Enter the model ID you want to use"
+        )
+        if model_input:
+            st.session_state.selected_model = model_input
+            st.session_state.models_fetched = True
+        
+        # Enable thinking for reasoning models
+        enable_thinking = st.checkbox(
+            "Enable thinking (for DeepSeek V4 / GLM 5.1)",
+            value=True,
+            help="Required for DeepSeek V4 and GLM 5.1 to prevent hanging"
+        )
+        st.session_state.nim_extra_body = enable_thinking
+        
+        st.caption("📊 40 requests per minute free")
+        st.caption("⚡ Kimi K3: 2.8T params, 1M context")
+    
     st.divider()
     
     # Attack Mode
@@ -245,7 +283,7 @@ def call_openrouter(api_key, model, messages):
         stream=True,
         extra_headers={
             "HTTP-Referer": "https://streamlit.ai",
-            "X-Title": "Triple-Backend Agent Studio"
+            "X-Title": "Quad-Backend Agent Studio"
         }
     )
 
@@ -255,17 +293,12 @@ def call_gemini(api_key, model, messages):
         import google.generativeai as genai
         genai.configure(api_key=api_key)
         
-        # Convert OpenAI messages to Gemini format
         gemini_model = genai.GenerativeModel(model)
-        
-        # Build conversation history
         chat = gemini_model.start_chat(history=[])
         
-        # Send the last user message and get response
         for msg in messages:
             if msg["role"] == "user":
                 response = chat.send_message(msg["content"], stream=True)
-                # Stream the response
                 for chunk in response:
                     if hasattr(chunk, 'text') and chunk.text:
                         yield chunk.text
@@ -278,7 +311,6 @@ def call_gemini(api_key, model, messages):
 def call_freemodel(api_key, base_url, model, messages):
     """Call FreeModel.dev API with streaming."""
     try:
-        # Ensure base_url ends with /v1
         if not base_url.endswith("/v1"):
             base_url = base_url.rstrip("/") + "/v1"
             
@@ -287,7 +319,6 @@ def call_freemodel(api_key, base_url, model, messages):
             api_key=api_key,
         )
         
-        # Use "auto" as default if no model specified
         model_to_use = model if model and model != "" else "auto"
         
         response = client.chat.completions.create(
@@ -300,7 +331,50 @@ def call_freemodel(api_key, base_url, model, messages):
             }
         )
         
-        # Stream the response chunks
+        for chunk in response:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+                
+    except Exception as e:
+        yield f"❌ Error: {str(e)}"
+
+def call_nim(api_key, base_url, model, messages, enable_thinking=False):
+    """Call NVIDIA NIM API with streaming."""
+    try:
+        client = OpenAI(
+            base_url=base_url,
+            api_key=api_key,
+        )
+        
+        # Prepare extra body for reasoning models
+        extra_body = {}
+        if enable_thinking:
+            extra_body = {
+                "chat_template_kwargs": {
+                    "enable_thinking": True,
+                    "thinking": True
+                }
+            }
+        
+        # Check if it's a reasoning model that needs thinking enabled
+        reasoning_models = ["deepseek-ai/deepseek-v4-flash", "glm-5.1", "glm-5.2"]
+        if any(model.startswith(rm) for rm in reasoning_models):
+            if not enable_thinking:
+                st.warning("⚠️ This model requires thinking enabled. Enabling it now...")
+                extra_body = {
+                    "chat_template_kwargs": {
+                        "enable_thinking": True,
+                        "thinking": True
+                    }
+                }
+        
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            stream=True,
+            extra_body=extra_body if extra_body else None
+        )
+        
         for chunk in response:
             if chunk.choices and chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
@@ -325,7 +399,7 @@ def is_refusal(text):
 # -------------------------------
 # MAIN UI
 # -------------------------------
-st.title("⚡ Triple-Backend Agent Studio")
+st.title("⚡ Quad-Backend Agent Studio")
 st.caption(f"Backend: {st.session_state.backend} | Model: {st.session_state.selected_model if st.session_state.selected_model else 'Not selected'}")
 
 # Initialize messages with system prompt
@@ -398,6 +472,19 @@ if prompt := st.chat_input("What is your request?"):
                         st.session_state.freemodel_base_url,
                         st.session_state.selected_model, 
                         api_messages
+                    )
+                    for chunk in stream:
+                        response += chunk
+                        placeholder.markdown(response + "▌")
+                    placeholder.markdown(response)
+                
+                elif st.session_state.backend == "NVIDIA NIM":
+                    stream = call_nim(
+                        api_key,
+                        base_url if 'base_url' in locals() else "https://integrate.api.nvidia.com/v1",
+                        st.session_state.selected_model,
+                        api_messages,
+                        st.session_state.nim_extra_body
                     )
                     for chunk in stream:
                         response += chunk
