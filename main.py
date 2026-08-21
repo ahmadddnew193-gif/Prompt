@@ -113,22 +113,7 @@ def build_catalog(df):
 
 
 def build_system_prompt(df, chunk_records, user_query):
-    relevant = retrieve_relevant_chunks(user_query, chunk_records)
-    if relevant:
-        context_block = "\n\n---\n\n".join(
-            f'From "{r["title"]}" ({r["url"]}):\n{r["text"]}' for r in relevant
-        )
-    else:
-        context_block = (
-            "(No closely matching transcript excerpt for this question — answer "
-            "using solid Rocket League coaching knowledge in Spookluke's style.)"
-        )
-    catalog = build_catalog(df)
-    return (
-        f"{PERSONA_AND_SCOPE_PROMPT}\n\n"
-        f"VIDEO LIBRARY (✓ = transcript available):\n{catalog}\n\n"
-        f"RELEVANT TRANSCRIPT EXCERPTS FOR THIS QUESTION:\n{context_block}\n"
-    )
+    return ""
 
 
 def fetch_missing_transcripts(df, progress_cb=None):
@@ -153,9 +138,7 @@ def fetch_missing_transcripts(df, progress_cb=None):
 
 
 
-# sidebar
-if "df" not in st.session_state:
-    st.session_state.df = load_data()
+
 
 with st.sidebar:
     st.header("Garage Settings")
@@ -173,7 +156,6 @@ with st.sidebar:
 
     st.divider()
     
-    df = st.session_state.df
 
     st.subheader("Get a key at https://openrouter.ai/keys")
 
@@ -185,7 +167,7 @@ with st.sidebar:
         st.rerun()
 
 # Rebuild the retrieval index whenever the dataset in memory changes
-chunk_records = build_chunk_index(st.session_state.df)
+
 
 # main ui
 st.title("Spookluke RL Coach")
@@ -210,7 +192,7 @@ if prompt:
         st.markdown(prompt)
 
     client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=api_key)
-    system_prompt = build_system_prompt(st.session_state.df, chunk_records, prompt)
+    system_prompt = PERSONA_AND_SCOPE_PROMPT
     api_messages = [{"role": "system", "content": system_prompt}] + st.session_state.messages
 
     with st.chat_message("assistant"):
